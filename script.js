@@ -2,7 +2,9 @@
 const AppState = {
     currentSection: 'inicio',
     currentSubject: null,
-    scheduleAutoSaveTimeout: null
+    currentFolder: null,
+    scheduleAutoSaveTimeout: null,
+    darkMode: false
 };
 
 // ==================== CLASES Y ESTRUCTURAS ====================
@@ -14,7 +16,8 @@ class StorageManager {
     static KEYS = {
         SCHEDULE: 'schedule',
         SUBJECTS: 'subjects',
-        TASKS: 'tasks'
+        TASKS: 'tasks',
+        DARK_MODE: 'darkMode'
     };
 
     static get(key) {
@@ -33,7 +36,7 @@ class StorageManager {
         } catch (error) {
             console.error('Error writing to storage:', error);
             if (error.name === 'QuotaExceededError') {
-                alert('Storage limit exceeded. Please delete some images or content.');
+                alert('Espacio de almacenamiento lleno. Elimina algunas imágenes.');
             }
         }
     }
@@ -48,16 +51,47 @@ class StorageManager {
 }
 
 /**
- * Gestiona las asignaturas y apuntes
+ * Gestiona las asignaturas y carpetas con apuntes
  */
 class SubjectManager {
     static createSubject(name) {
         return {
             id: Date.now(),
             name: name,
-            notes: '',
-            images: [] // Array de base64 strings
+            folders: []
         };
+    }
+
+    static createFolder(name) {
+        return {
+            id: Date.now(),
+            name: name,
+            notes: '',
+            images: []
+        };
+    }
+
+    static migrateOldData() {
+        const subjects = StorageManager.get(StorageManager.KEYS.SUBJECTS);
+        if (subjects && subjects.length > 0) {
+            const firstSubject = subjects[0];
+            if (!firstSubject.folders) {
+                subjects.forEach(subject => {
+                    if (!subject.folders) {
+                        const folder = {
+                            id: Date.now() + Math.random(),
+                            name: 'Apuntes',
+                            notes: subject.notes || '',
+                            images: subject.images || []
+                        };
+                        subject.folders = [folder];
+                        delete subject.notes;
+                        delete subject.images;
+                    }
+                });
+                StorageManager.set(StorageManager.KEYS.SUBJECTS, subjects);
+            }
+        }
     }
 
     static getAllSubjects() {
@@ -93,24 +127,65 @@ class SubjectManager {
         return subjects.find(s => s.id === subjectId);
     }
 
-    static addImageToSubject(subjectId, base64Image) {
+    static addFolder(subjectId, folder) {
         const subject = this.getSubject(subjectId);
         if (subject) {
-            subject.images.push({
-                id: Date.now(),
-                data: base64Image
-            });
+            subject.folders.push(folder);
             this.updateSubject(subjectId, subject);
             return true;
         }
         return false;
     }
 
-    static removeImageFromSubject(subjectId, imageId) {
+    static getFolder(subjectId, folderId) {
         const subject = this.getSubject(subjectId);
         if (subject) {
-            subject.images = subject.images.filter(img => img.id !== imageId);
+            return subject.folders.find(f => f.id === folderId);
+        }
+        return null;
+    }
+
+    static updateFolder(subjectId, folderId, updates) {
+        const subject = this.getSubject(subjectId);
+        if (subject) {
+            const folderIndex = subject.folders.findIndex(f => f.id === folderId);
+            if (folderIndex !== -1) {
+                subject.folders[folderIndex] = { ...subject.folders[folderIndex], ...updates };
+                this.updateSubject(subjectId, subject);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static deleteFolder(subjectId, folderId) {
+        const subject = this.getSubject(subjectId);
+        if (subject) {
+            subject.folders = subject.folders.filter(f => f.id !== folderId);
             this.updateSubject(subjectId, subject);
+            return true;
+        }
+        return false;
+    }
+
+    static addImageToFolder(subjectId, folderId, compressedImage) {
+        const folder = this.getFolder(subjectId, folderId);
+        if (folder) {
+            folder.images.push({
+                id: Date.now(),
+                data: compressedImage
+            });
+            this.updateFolder(subjectId, folderId, folder);
+            return true;
+        }
+        return false;
+    }
+
+    static removeImageFromFolder(subjectId, folderId, imageId) {
+        const folder = this.getFolder(subjectId, folderId);
+        if (folder) {
+            folder.images = folder.images.filter(img => img.id !== imageId);
+            this.updateFolder(subjectId, folderId, folder);
             return true;
         }
         return false;
@@ -157,38 +232,124 @@ class TaskManager {
     }
 }
 
-// ==================== FUNCIONES DE NAVEGACIÓN ====================
+/**
+ * Gestiona la compresión de imágenes
+ */
+class ImageCompressor {
+    static async compress(file, maxWidth = 800, quality = 0.7) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxWidth) {
+                        height = (maxWidth / width) * height;
+                        width = maxWidth;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+                    resolve(compressedBase64);
+                };
+                img.onerror = reject;
+                img.src = event.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+}
 
 /**
- * Cambia entre secciones
+ * Gestiona el horario visual
  */
+class ScheduleManager {
+    static HOURS = ['8:00', '9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    static DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+
+    static getScheduleData() {
+        return StorageManager.getOrDefault(StorageManager.KEYS.SCHEDULE, {});
+    }
+
+    static saveScheduleCell(hour, day, value) {
+        const schedule = this.getScheduleData();
+        const key = `${hour}-${day}`;
+        if (value.trim()) {
+            schedule[key] = value;
+        } else {
+            delete schedule[key];
+        }
+        StorageManager.set(StorageManager.KEYS.SCHEDULE, schedule);
+    }
+
+    static getScheduleCell(hour, day) {
+        const schedule = this.getScheduleData();
+        const key = `${hour}-${day}`;
+        return schedule[key] || '';
+    }
+}
+
+// ==================== FUNCIONES DE TEMA OSCURO ====================
+
+function initDarkMode() {
+    const darkModeBtn = document.getElementById('darkModeBtn');
+    const savedDarkMode = StorageManager.get(StorageManager.KEYS.DARK_MODE);
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    AppState.darkMode = savedDarkMode !== null ? savedDarkMode : prefersDark;
+    applyDarkMode(AppState.darkMode);
+
+    darkModeBtn.addEventListener('click', () => {
+        AppState.darkMode = !AppState.darkMode;
+        applyDarkMode(AppState.darkMode);
+        StorageManager.set(StorageManager.KEYS.DARK_MODE, AppState.darkMode);
+    });
+}
+
+function applyDarkMode(isDark) {
+    if (isDark) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('darkModeBtn').textContent = '☀️';
+    } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('darkModeBtn').textContent = '🌙';
+    }
+}
+
+// ==================== FUNCIONES DE NAVEGACIÓN ====================
+
 function navigateToSection(sectionId) {
-    // Ocultar todas las secciones
     document.querySelectorAll('.section').forEach(section => {
         section.classList.remove('active');
     });
 
-    // Mostrar la sección seleccionada
     const targetSection = document.getElementById(sectionId);
     if (targetSection) {
         targetSection.classList.add('active');
     }
 
-    // Actualizar estado de navegación
     AppState.currentSection = sectionId;
 
-    // Actualizar links activos
     document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.remove('active');
         if (link.dataset.section === sectionId) {
             link.classList.add('active');
         }
     });
+
+    if (sectionId === 'horarios') {
+        renderSchedule();
+    }
 }
 
-/**
- * Inicializa los listeners de navegación
- */
 function initNavigation() {
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', (e) => {
@@ -199,34 +360,46 @@ function initNavigation() {
     });
 }
 
-// ==================== FUNCIONES DE HORARIOS ====================
+// ==================== FUNCIONES DE HORARIO VISUAL ====================
 
-/**
- * Inicializa la sección de horarios
- */
-function initSchedule() {
-    const scheduleInput = document.getElementById('scheduleText');
+function renderSchedule() {
+    const tbody = document.getElementById('scheduleBody');
+    tbody.innerHTML = '';
 
-    // Cargar horario guardado
-    const savedSchedule = StorageManager.get(StorageManager.KEYS.SCHEDULE);
-    if (savedSchedule) {
-        scheduleInput.value = savedSchedule;
-    }
+    ScheduleManager.HOURS.forEach(hour => {
+        const tr = document.createElement('tr');
+        
+        const timeCell = document.createElement('td');
+        timeCell.className = 'schedule-cell schedule-cell-time';
+        timeCell.textContent = hour;
+        tr.appendChild(timeCell);
 
-    // Guardar automáticamente cada 2 segundos
-    scheduleInput.addEventListener('input', () => {
-        clearTimeout(AppState.scheduleAutoSaveTimeout);
-        AppState.scheduleAutoSaveTimeout = setTimeout(() => {
-            StorageManager.set(StorageManager.KEYS.SCHEDULE, scheduleInput.value);
-        }, 2000);
+        ScheduleManager.DAYS.forEach(day => {
+            const td = document.createElement('td');
+            const textarea = document.createElement('textarea');
+            textarea.className = 'schedule-cell';
+            textarea.value = ScheduleManager.getScheduleCell(hour, day);
+            textarea.placeholder = `${day} ${hour}`;
+
+            textarea.addEventListener('blur', () => {
+                ScheduleManager.saveScheduleCell(hour, day, textarea.value);
+            });
+
+            textarea.addEventListener('input', () => {
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+            });
+
+            td.appendChild(textarea);
+            tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
     });
 }
 
 // ==================== FUNCIONES DE APUNTES ====================
 
-/**
- * Renderiza las tarjetas de asignaturas
- */
 function renderSubjects() {
     const grid = document.getElementById('subjectsGrid');
     grid.innerHTML = '';
@@ -234,7 +407,7 @@ function renderSubjects() {
     const subjects = SubjectManager.getAllSubjects();
 
     if (subjects.length === 0) {
-        grid.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary);">No hay asignaturas aún. ¡Crea una para empezar!</p>';
+        grid.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary);">No hay asignaturas. ¡Crea una!</p>';
         return;
     }
 
@@ -244,44 +417,72 @@ function renderSubjects() {
     });
 }
 
-/**
- * Crea una tarjeta de asignatura
- */
 function createSubjectCard(subject) {
     const card = document.createElement('div');
     card.className = 'subject-card';
 
-    // Preview del contenido
-    let preview = '';
-    if (subject.notes) {
-        preview = subject.notes.substring(0, 100) + (subject.notes.length > 100 ? '...' : '');
-    } else if (subject.images.length > 0) {
-        preview = `${subject.images.length} imagen(es)`;
-    } else {
-        preview = 'Sin contenido aún';
-    }
-
-    card.innerHTML = `
-        <div class="subject-card-header">
-            <h3>${escapeHtml(subject.name)}</h3>
-            <div class="subject-card-actions">
-                <button class="btn-icon delete" data-id="${subject.id}" title="Eliminar">🗑️</button>
-            </div>
+    const header = document.createElement('div');
+    header.className = 'subject-card-header';
+    header.innerHTML = `
+        <h3>${escapeHtml(subject.name)}</h3>
+        <div class="subject-card-actions">
+            <button class="btn-icon delete" data-id="${subject.id}" title="Eliminar">🗑️</button>
         </div>
-        <div class="subject-preview">${escapeHtml(preview)}</div>
     `;
 
-    // Click en la tarjeta para editar (excepto en el botón delete)
-    card.addEventListener('click', (e) => {
-        if (!e.target.closest('.btn-icon')) {
-            openNotesModal(subject.id);
+    const preview = document.createElement('div');
+    preview.className = 'subject-preview';
+    preview.textContent = subject.folders.length + ' carpeta(s)';
+
+    const foldersList = document.createElement('div');
+    foldersList.className = 'folders-list';
+
+    subject.folders.forEach(folder => {
+        const folderItem = document.createElement('div');
+        folderItem.className = 'folder-item';
+        folderItem.innerHTML = `
+            <span class="folder-item-name">📁 ${escapeHtml(folder.name)}</span>
+            <div class="folder-item-actions">
+                <button class="folder-item-btn delete" data-subject-id="${subject.id}" data-folder-id="${folder.id}">🗑️</button>
+            </div>
+        `;
+
+        folderItem.querySelector('.folder-item-name').addEventListener('click', () => {
+            openFolderModal(subject.id, folder.id);
+        });
+
+        folderItem.querySelector('.folder-item-btn.delete').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm(`¿Eliminar la carpeta "${folder.name}"?`)) {
+                SubjectManager.deleteFolder(subject.id, folder.id);
+                renderSubjects();
+            }
+        });
+
+        foldersList.appendChild(folderItem);
+    });
+
+    const addFolderBtn = document.createElement('button');
+    addFolderBtn.className = 'add-folder-btn';
+    addFolderBtn.textContent = '+ Agregar carpeta';
+    addFolderBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const folderName = prompt('Nombre de la carpeta:');
+        if (folderName) {
+            const folder = SubjectManager.createFolder(folderName);
+            SubjectManager.addFolder(subject.id, folder);
+            renderSubjects();
         }
     });
 
-    // Botón eliminar
+    card.appendChild(header);
+    card.appendChild(preview);
+    card.appendChild(foldersList);
+    card.appendChild(addFolderBtn);
+
     card.querySelector('.btn-icon.delete').addEventListener('click', (e) => {
         e.stopPropagation();
-        if (confirm(`¿Eliminar la asignatura "${subject.name}"?`)) {
+        if (confirm(`¿Eliminar "${subject.name}" y todas sus carpetas?`)) {
             SubjectManager.deleteSubject(subject.id);
             renderSubjects();
         }
@@ -290,52 +491,42 @@ function createSubjectCard(subject) {
     return card;
 }
 
-/**
- * Abre el modal de edición de apuntes
- */
-function openNotesModal(subjectId) {
-    const subject = SubjectManager.getSubject(subjectId);
-    if (!subject) return;
+function openFolderModal(subjectId, folderId) {
+    const folder = SubjectManager.getFolder(subjectId, folderId);
+    if (!folder) return;
 
     AppState.currentSubject = subjectId;
+    AppState.currentFolder = folderId;
 
-    // Actualizar UI del modal
-    document.getElementById('modalTitle').textContent = `Apuntes de ${subject.name}`;
-    document.getElementById('notesText').value = subject.notes;
+    const subject = SubjectManager.getSubject(subjectId);
+    document.getElementById('folderModalTitle').textContent = `${subject.name} > ${folder.name}`;
+    document.getElementById('folderNotesText').value = folder.notes;
 
-    // Cargar imágenes
-    renderImagesInModal(subject.images);
+    renderFolderImages(folder.images);
 
-    // Mostrar modal
-    document.getElementById('notesModal').classList.add('active');
-    document.getElementById('modalOverlay').classList.add('active');
+    document.getElementById('folderModal').classList.add('active');
+    document.getElementById('folderModalOverlay').classList.add('active');
 }
 
-/**
- * Cierra el modal
- */
-function closeNotesModal() {
-    const subjectId = AppState.currentSubject;
-    if (subjectId) {
-        const notes = document.getElementById('notesText').value;
-        SubjectManager.updateSubject(subjectId, { notes });
+function closeFolderModal() {
+    if (AppState.currentSubject && AppState.currentFolder) {
+        const notes = document.getElementById('folderNotesText').value;
+        SubjectManager.updateFolder(AppState.currentSubject, AppState.currentFolder, { notes });
         renderSubjects();
     }
 
-    document.getElementById('notesModal').classList.remove('active');
-    document.getElementById('modalOverlay').classList.remove('active');
+    document.getElementById('folderModal').classList.remove('active');
+    document.getElementById('folderModalOverlay').classList.remove('active');
     AppState.currentSubject = null;
+    AppState.currentFolder = null;
 }
 
-/**
- * Renderiza las imágenes en el modal
- */
-function renderImagesInModal(images) {
-    const list = document.getElementById('imagesList');
+function renderFolderImages(images) {
+    const list = document.getElementById('folderImagesList');
     list.innerHTML = '';
 
     if (images.length === 0) {
-        list.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary); padding: 1rem;">Sin imágenes aún</p>';
+        list.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary); padding: 1rem;">Sin imágenes</p>';
         return;
     }
 
@@ -348,9 +539,10 @@ function renderImagesInModal(images) {
         `;
 
         item.querySelector('.image-delete-btn').addEventListener('click', () => {
-            if (AppState.currentSubject) {
-                SubjectManager.removeImageFromSubject(AppState.currentSubject, image.id);
-                renderImagesInModal(SubjectManager.getSubject(AppState.currentSubject).images);
+            if (AppState.currentSubject && AppState.currentFolder) {
+                SubjectManager.removeImageFromFolder(AppState.currentSubject, AppState.currentFolder, image.id);
+                const folder = SubjectManager.getFolder(AppState.currentSubject, AppState.currentFolder);
+                renderFolderImages(folder.images);
             }
         });
 
@@ -358,48 +550,45 @@ function renderImagesInModal(images) {
     });
 }
 
-/**
- * Maneja la subida de imágenes
- */
-function handleImageUpload(files) {
-    if (!AppState.currentSubject) return;
+async function handleFolderImageUpload(files) {
+    if (!AppState.currentSubject || !AppState.currentFolder) return;
 
-    Array.from(files).forEach(file => {
+    for (const file of files) {
         if (!file.type.startsWith('image/')) {
             alert('Solo se permiten archivos de imagen');
-            return;
+            continue;
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const base64 = e.target.result;
-            SubjectManager.addImageToSubject(AppState.currentSubject, base64);
-            renderImagesInModal(SubjectManager.getSubject(AppState.currentSubject).images);
-        };
-        reader.readAsDataURL(file);
-    });
+        try {
+            const compressedBase64 = await ImageCompressor.compress(file);
+            SubjectManager.addImageToFolder(AppState.currentSubject, AppState.currentFolder, compressedBase64);
+            const folder = SubjectManager.getFolder(AppState.currentSubject, AppState.currentFolder);
+            renderFolderImages(folder.images);
+        } catch (error) {
+            console.error('Error compressing image:', error);
+            alert('Error al procesar la imagen');
+        }
+    }
 
-    // Limpiar input
-    document.getElementById('imageInput').value = '';
+    document.getElementById('folderImageInput').value = '';
 }
 
-/**
- * Inicializa la sección de apuntes
- */
 function initSubjects() {
+    SubjectManager.migrateOldData();
+
     const subjectInput = document.getElementById('subjectInput');
     const addSubjectBtn = document.getElementById('addSubjectBtn');
-    const imageInput = document.getElementById('imageInput');
-    const uploadImageBtn = document.getElementById('uploadImageBtn');
-    const modalClose = document.querySelector('.modal-close');
-    const modalCloseBtn = document.querySelector('.modal-close-btn');
-    const modalOverlay = document.getElementById('modalOverlay');
+    const folderImageInput = document.getElementById('folderImageInput');
+    const uploadFolderImageBtn = document.getElementById('uploadFolderImageBtn');
+    const folderModalClose = document.querySelector('#folderModal .modal-close');
+    const folderModalCloseBtn = document.querySelector('#folderModal .modal-close-btn');
+    const folderModalOverlay = document.getElementById('folderModalOverlay');
+    const folderModal = document.getElementById('folderModal');
 
-    // Agregar nueva asignatura
     addSubjectBtn.addEventListener('click', () => {
         const name = subjectInput.value.trim();
         if (!name) {
-            alert('Por favor, ingresa el nombre de la asignatura');
+            alert('Ingresa el nombre de la asignatura');
             return;
         }
 
@@ -410,38 +599,27 @@ function initSubjects() {
     });
 
     subjectInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            addSubjectBtn.click();
-        }
+        if (e.key === 'Enter') addSubjectBtn.click();
     });
 
-    // Subir imágenes
-    uploadImageBtn.addEventListener('click', () => {
-        imageInput.click();
+    uploadFolderImageBtn.addEventListener('click', () => {
+        folderImageInput.click();
     });
 
-    imageInput.addEventListener('change', (e) => {
-        handleImageUpload(e.target.files);
+    folderImageInput.addEventListener('change', (e) => {
+        handleFolderImageUpload(e.target.files);
     });
 
-    // Cerrar modal
-    modalClose.addEventListener('click', closeNotesModal);
-    modalCloseBtn.addEventListener('click', closeNotesModal);
-    modalOverlay.addEventListener('click', closeNotesModal);
-
-    // Evitar cerrar al hacer click en el contenido del modal
-    document.getElementById('notesModal').addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
+    folderModalClose.addEventListener('click', closeFolderModal);
+    folderModalCloseBtn.addEventListener('click', closeFolderModal);
+    folderModalOverlay.addEventListener('click', closeFolderModal);
+    folderModal.addEventListener('click', (e) => e.stopPropagation());
 
     renderSubjects();
 }
 
 // ==================== FUNCIONES DE ACTIVIDADES ====================
 
-/**
- * Renderiza las tareas
- */
 function renderTasks() {
     const list = document.getElementById('tasksList');
     list.innerHTML = '';
@@ -449,7 +627,7 @@ function renderTasks() {
     const tasks = TaskManager.getAllTasks();
 
     if (tasks.length === 0) {
-        list.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem;">No hay tareas. ¡Crea una para empezar!</p>';
+        list.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem;">No hay tareas</p>';
         return;
     }
 
@@ -464,13 +642,11 @@ function renderTasks() {
             </div>
         `;
 
-        // Marcar como completada
         item.querySelector('.task-checkbox').addEventListener('change', () => {
             TaskManager.toggleTask(task.id);
             renderTasks();
         });
 
-        // Eliminar tarea
         item.querySelector('.btn-delete').addEventListener('click', () => {
             TaskManager.deleteTask(task.id);
             renderTasks();
@@ -480,9 +656,6 @@ function renderTasks() {
     });
 }
 
-/**
- * Inicializa la sección de actividades
- */
 function initTasks() {
     const taskInput = document.getElementById('taskInput');
     const addTaskBtn = document.getElementById('addTaskBtn');
@@ -490,7 +663,7 @@ function initTasks() {
     addTaskBtn.addEventListener('click', () => {
         const text = taskInput.value.trim();
         if (!text) {
-            alert('Por favor, ingresa el texto de la tarea');
+            alert('Ingresa el texto de la tarea');
             return;
         }
 
@@ -501,9 +674,7 @@ function initTasks() {
     });
 
     taskInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            addTaskBtn.click();
-        }
+        if (e.key === 'Enter') addTaskBtn.click();
     });
 
     renderTasks();
@@ -511,37 +682,24 @@ function initTasks() {
 
 // ==================== FUNCIONES UTILITARIAS ====================
 
-/**
- * Escapa caracteres HTML para evitar XSS
- */
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-/**
- * Inicializa toda la aplicación
- */
 function initApp() {
-    // Inicializar navegación
+    initDarkMode();
     initNavigation();
-
-    // Inicializar secciones
-    initSchedule();
     initSubjects();
     initTasks();
-
-    // Navegar a la sección de inicio por defecto
     navigateToSection('inicio');
 }
 
 // ==================== PUNTO DE ENTRADA ====================
 
-// Esperar a que el DOM esté listo
 document.addEventListener('DOMContentLoaded', initApp);
 
-// Manejar cambios en otras pestañas (sincronización)
 window.addEventListener('storage', () => {
     if (AppState.currentSection === 'apuntes') {
         renderSubjects();

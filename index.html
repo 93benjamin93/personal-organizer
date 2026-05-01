@@ -13,6 +13,9 @@
             <div class="navbar-brand">
                 <h1>📚 Organizador Personal</h1>
             </div>
+            <div class="navbar-actions">
+                <button id="darkModeBtn" class="btn-dark-mode" title="Cambiar modo">🌙</button>
+            </div>
             <ul class="nav-menu">
                 <li><a href="#" class="nav-link active" data-section="inicio">Inicio</a></li>
                 <li><a href="#" class="nav-link" data-section="horarios">Horarios</a></li>
@@ -34,12 +37,13 @@
                 <h3>Hola, estudiante</h3>
                 <p>Este es tu panel de organización personal. Aquí puedes:</p>
                 <ul class="welcome-list">
-                    <li>📅 Organizar tu horario de clases</li>
-                    <li>📝 Guardar apuntes por asignatura</li>
-                    <li>📸 Subir fotos de apuntes</li>
-                    <li>✅ Crear y gestionar tareas</li>
+                    <li>📅 Crear un horario visual interactivo</li>
+                    <li>📝 Guardar apuntes organizados por carpetas</li>
+                    <li>📸 Subir fotos optimizadas de apuntes</li>
+                    <li>✅ Gestionar tareas y actividades</li>
+                    <li>🌙 Cambiar entre modo claro y oscuro</li>
                 </ul>
-                <p class="welcome-text">Todo se guarda automáticamente en tu dispositivo. ¡Comienza por crear una asignatura en Apuntes!</p>
+                <p class="welcome-text">Todo se guarda automáticamente en tu dispositivo. ¡Comienza creando tu horario!</p>
             </div>
         </section>
 
@@ -49,9 +53,20 @@
                 <h2>📅 Mi Horario</h2>
             </div>
             <div class="section-content">
-                <div class="schedule-container">
-                    <textarea id="scheduleText" class="schedule-input" placeholder="Escribe tu horario aquí...&#10;Ejemplo:&#10;Lunes: Matemáticas 9:00-11:00&#10;Martes: Inglés 10:00-12:00&#10;..."></textarea>
-                    <p class="help-text">💡 Se guarda automáticamente cada 2 segundos</p>
+                <div class="schedule-grid-wrapper">
+                    <table class="schedule-grid">
+                        <thead>
+                            <tr>
+                                <th>Hora</th>
+                                <th>Lunes</th>
+                                <th>Martes</th>
+                                <th>Miércoles</th>
+                                <th>Jueves</th>
+                                <th>Viernes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scheduleBody"></tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -67,7 +82,7 @@
                     </div>
                 </div>
             </div>
-            <div class="section-content">
+            <div id="subjectsContainer" class="subjects-container">
                 <div id="subjectsGrid" class="subjects-grid"></div>
             </div>
         </section>
@@ -89,33 +104,31 @@
         </section>
     </main>
 
-    <!-- MODAL: EDITAR APUNTES -->
-    <div id="modalOverlay" class="modal-overlay"></div>
-    <div id="notesModal" class="modal">
+    <!-- MODAL: CARPETA DE APUNTES -->
+    <div id="folderModalOverlay" class="modal-overlay"></div>
+    <div id="folderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="modalTitle">Editar Apuntes</h3>
+                <h3 id="folderModalTitle">Carpeta</h3>
                 <button class="modal-close">×</button>
             </div>
-            
             <div class="modal-body">
                 <!-- SECCIÓN: TEXTO DE APUNTES -->
                 <div class="modal-section">
                     <h4>Apuntes</h4>
-                    <textarea id="notesText" class="notes-input" placeholder="Escribe tus apuntes aquí..."></textarea>
+                    <textarea id="folderNotesText" class="notes-input" placeholder="Escribe tus apuntes aquí..."></textarea>
                 </div>
 
                 <!-- SECCIÓN: IMÁGENES -->
                 <div class="modal-section">
                     <div class="images-header">
-                        <h4>Imágenes de Apuntes</h4>
-                        <button id="uploadImageBtn" class="btn btn-small btn-secondary">📷 Subir Imagen</button>
-                        <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+                        <h4>Imágenes</h4>
+                        <button id="uploadFolderImageBtn" class="btn btn-small btn-secondary">📷 Subir</button>
+                        <input type="file" id="folderImageInput" accept="image/*" multiple style="display: none;">
                     </div>
-                    <div id="imagesList" class="images-grid"></div>
+                    <div id="folderImagesList" class="images-grid"></div>
                 </div>
             </div>
-
             <div class="modal-footer">
                 <button class="modal-close-btn btn btn-secondary">Cerrar</button>
             </div>
