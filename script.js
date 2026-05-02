@@ -1,10 +1,12 @@
+name=script.js
 // ==================== ESTADO DE LA APLICACIÓN ====================
 const AppState = {
     currentSection: 'inicio',
     currentSubject: null,
     currentFolder: null,
     scheduleAutoSaveTimeout: null,
-    darkMode: false
+    darkMode: false,
+    imageViewerData: null
 };
 
 // ==================== CLASES Y ESTRUCTURAS ====================
@@ -47,6 +49,27 @@ class StorageManager {
 
     static getOrDefault(key, defaultValue) {
         return this.get(key) ?? defaultValue;
+    }
+}
+
+/**
+ * Utilidad para debounce en funciones
+ */
+class DebounceManager {
+    static timers = {};
+
+    static debounce(key, fn, delay = 1000) {
+        if (this.timers[key]) {
+            clearTimeout(this.timers[key]);
+        }
+        this.timers[key] = setTimeout(fn, delay);
+    }
+
+    static clear(key) {
+        if (this.timers[key]) {
+            clearTimeout(this.timers[key]);
+            delete this.timers[key];
+        }
     }
 }
 
@@ -272,7 +295,15 @@ class ImageCompressor {
  * Gestiona el horario visual
  */
 class ScheduleManager {
-    static HOURS = ['8:00', '9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    static generateHours() {
+        const hours = [];
+        for (let i = 8; i <= 21; i++) {
+            hours.push(`${i.toString().padStart(2, '0')}:00`);
+        }
+        return hours;
+    }
+
+    static HOURS = ScheduleManager.generateHours();
     static DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
 
     static getScheduleData() {
@@ -381,13 +412,20 @@ function renderSchedule() {
             textarea.value = ScheduleManager.getScheduleCell(hour, day);
             textarea.placeholder = `${day} ${hour}`;
 
-            textarea.addEventListener('blur', () => {
-                ScheduleManager.saveScheduleCell(hour, day, textarea.value);
-            });
-
+            // Guardar con debounce en tiempo real (evento input)
             textarea.addEventListener('input', () => {
                 textarea.style.height = 'auto';
                 textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+                
+                // Debounce de 800ms para no saturar localStorage
+                DebounceManager.debounce(`schedule-${hour}-${day}`, () => {
+                    ScheduleManager.saveScheduleCell(hour, day, textarea.value);
+                }, 800);
+            });
+
+            // Guardar inmediatamente al perder foco (respaldo)
+            textarea.addEventListener('blur', () => {
+                ScheduleManager.saveScheduleCell(hour, day, textarea.value);
             });
 
             td.appendChild(textarea);
@@ -396,6 +434,84 @@ function renderSchedule() {
 
         tbody.appendChild(tr);
     });
+}
+
+// ==================== FUNCIONES DE VISOR DE IMÁGENES ====================
+
+function initImageViewer() {
+    // Crear modal de visor de imágenes
+    const viewerHTML = `
+        <div id="imageViewerOverlay" class="image-viewer-overlay"></div>
+        <div id="imageViewerModal" class="image-viewer-modal">
+            <button class="image-viewer-close">×</button>
+            <button class="image-viewer-prev">‹</button>
+            <img id="imageViewerImg" src="" alt="Imagen ampliada">
+            <button class="image-viewer-next">›</button>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', viewerHTML);
+
+    const overlay = document.getElementById('imageViewerOverlay');
+    const modal = document.getElementById('imageViewerModal');
+    const closeBtn = document.querySelector('.image-viewer-close');
+    const prevBtn = document.querySelector('.image-viewer-prev');
+    const nextBtn = document.querySelector('.image-viewer-next');
+
+    function closeViewer() {
+        overlay.classList.remove('active');
+        modal.classList.remove('active');
+        AppState.imageViewerData = null;
+    }
+
+    function showImage(index) {
+        if (!AppState.imageViewerData) return;
+        
+        const { images, currentIndex } = AppState.imageViewerData;
+        let newIndex = index;
+        
+        if (newIndex < 0) newIndex = images.length - 1;
+        if (newIndex >= images.length) newIndex = 0;
+        
+        AppState.imageViewerData.currentIndex = newIndex;
+        const img = document.getElementById('imageViewerImg');
+        img.src = images[newIndex].data;
+        
+        // Mostrar/ocultar botones de navegación
+        prevBtn.style.display = images.length > 1 ? 'block' : 'none';
+        nextBtn.style.display = images.length > 1 ? 'block' : 'none';
+    }
+
+    closeBtn.addEventListener('click', closeViewer);
+    overlay.addEventListener('click', closeViewer);
+    modal.addEventListener('click', (e) => e.stopPropagation());
+    
+    prevBtn.addEventListener('click', () => {
+        if (AppState.imageViewerData) {
+            showImage(AppState.imageViewerData.currentIndex - 1);
+        }
+    });
+    
+    nextBtn.addEventListener('click', () => {
+        if (AppState.imageViewerData) {
+            showImage(AppState.imageViewerData.currentIndex + 1);
+        }
+    });
+
+    // Navegación con teclado
+    document.addEventListener('keydown', (e) => {
+        if (!AppState.imageViewerData) return;
+        if (e.key === 'ArrowLeft') prevBtn.click();
+        if (e.key === 'ArrowRight') nextBtn.click();
+        if (e.key === 'Escape') closeViewer();
+    });
+
+    return { openViewer: (images, startIndex = 0) => {
+        AppState.imageViewerData = { images, currentIndex: startIndex };
+        overlay.classList.add('active');
+        modal.classList.add('active');
+        showImage(startIndex);
+    }};
 }
 
 // ==================== FUNCIONES DE APUNTES ====================
@@ -530,15 +646,22 @@ function renderFolderImages(images) {
         return;
     }
 
-    images.forEach(image => {
+    images.forEach((image, index) => {
         const item = document.createElement('div');
         item.className = 'image-item';
         item.innerHTML = `
-            <img src="${image.data}" alt="Apunte">
+            <img src="${image.data}" alt="Apunte" class="image-item-img">
             <button class="image-delete-btn" data-id="${image.id}">×</button>
         `;
 
-        item.querySelector('.image-delete-btn').addEventListener('click', () => {
+        // Abrir visor al hacer click en la imagen
+        item.querySelector('.image-item-img').addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.imageViewer.openViewer(images, index);
+        });
+
+        item.querySelector('.image-delete-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
             if (AppState.currentSubject && AppState.currentFolder) {
                 SubjectManager.removeImageFromFolder(AppState.currentSubject, AppState.currentFolder, image.id);
                 const folder = SubjectManager.getFolder(AppState.currentSubject, AppState.currentFolder);
@@ -691,6 +814,7 @@ function escapeHtml(text) {
 function initApp() {
     initDarkMode();
     initNavigation();
+    window.imageViewer = initImageViewer();
     initSubjects();
     initTasks();
     navigateToSection('inicio');
