@@ -1,3 +1,4 @@
+name=style.css
 /* ==================== DARK MODE VARIABLES ==================== */
 
 :root {
@@ -716,15 +717,17 @@ body {
     box-shadow: var(--shadow-md);
 }
 
-.image-item img {
+.image-item-img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     transition: var(--transition);
+    cursor: pointer;
 }
 
-.image-item:hover img {
+.image-item-img:hover {
     opacity: 0.7;
+    transform: scale(1.05);
 }
 
 .image-delete-btn {
@@ -753,6 +756,113 @@ body {
 .image-delete-btn:hover {
     background-color: #dc2626;
     transform: scale(1.1);
+}
+
+/* ==================== VISOR DE IMÁGENES ==================== */
+
+.image-viewer-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.95);
+    z-index: 300;
+    animation: fadeIn 0.3s ease;
+}
+
+.image-viewer-overlay.active {
+    display: block;
+}
+
+.image-viewer-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 301;
+    max-width: 90vw;
+    max-height: 90vh;
+    animation: zoomIn 0.3s ease;
+}
+
+.image-viewer-modal.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@keyframes zoomIn {
+    from {
+        transform: translate(-50%, -50%) scale(0.9);
+        opacity: 0;
+    }
+    to {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+}
+
+#imageViewerImg {
+    max-width: 100%;
+    max-height: 80vh;
+    object-fit: contain;
+    border-radius: var(--radius-lg);
+}
+
+.image-viewer-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: none;
+    font-size: 2.5rem;
+    cursor: pointer;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    z-index: 302;
+}
+
+.image-viewer-close:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.image-viewer-prev,
+.image-viewer-next {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: none;
+    font-size: 2rem;
+    cursor: pointer;
+    padding: 15px 20px;
+    border-radius: var(--radius-md);
+    transition: var(--transition);
+    z-index: 302;
+}
+
+.image-viewer-prev {
+    left: 20px;
+}
+
+.image-viewer-next {
+    right: 20px;
+}
+
+.image-viewer-prev:hover,
+.image-viewer-next:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-50%) scale(1.1);
 }
 
 /* ==================== TAREAS ==================== */
@@ -908,6 +1018,32 @@ body {
         padding: 0.5rem;
         min-height: 60px;
     }
+
+    .image-viewer-close {
+        width: 50px;
+        height: 50px;
+        font-size: 2rem;
+        top: 10px;
+        right: 10px;
+    }
+
+    .image-viewer-prev,
+    .image-viewer-next {
+        padding: 10px 15px;
+        font-size: 1.5rem;
+    }
+
+    .image-viewer-prev {
+        left: 10px;
+    }
+
+    .image-viewer-next {
+        right: 10px;
+    }
+
+    #imageViewerImg {
+        max-height: 70vh;
+    }
 }
 
 @media (max-width: 480px) {
@@ -952,6 +1088,20 @@ body {
     .schedule-cell {
         padding: 0.25rem;
         min-height: 50px;
+    }
+
+    .image-viewer-close {
+        width: 45px;
+        height: 45px;
+        font-size: 1.8rem;
+        top: 5px;
+        right: 5px;
+    }
+
+    .image-viewer-prev,
+    .image-viewer-next {
+        padding: 8px 12px;
+        font-size: 1.2rem;
     }
 }
 
